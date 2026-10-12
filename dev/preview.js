@@ -3,7 +3,7 @@
 (async function () {
   "use strict";
   const { runScript, renderWidget, fitText } = window.ScriptableMock;
-  const code = await (await fetch("/claude-usage-widget.js")).text();
+  const code = await (await fetch(new URLSearchParams(location.search).get("script") || "/claude-usage-widget.js")).text();
 
   const MIN = 60 * 1000;
   const HOUR = 60 * MIN;
@@ -134,7 +134,18 @@
         webView: "ok",
         api: api(okRoutes(usageBody({ five: 41, fiveReset: now + 2 * HOUR + 13 * MIN + 30000, week: 12, opus: 63, sonnet: 9 }))),
       }),
-      expectRequests: 2,
+      expectRequests: 3,
+    },
+    {
+      id: "web-fetch-blocked",
+      title: "앱 안 로그인 방식 — 웹 화면 fetch가 막혀 페이지 방식으로 전환",
+      env: () => ({
+        keychain: { "claude-usage-widget.mode": "web" },
+        files: {},
+        webView: "fetch-blocked",
+        api: api(okRoutes(usageBody({ five: 41, fiveReset: now + 2 * HOUR + 13 * MIN + 30000, week: 12, opus: 63, sonnet: 9 }))),
+      }),
+      expectRequests: 3,
     },
     {
       id: "web-unavailable",

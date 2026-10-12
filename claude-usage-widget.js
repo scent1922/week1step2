@@ -256,18 +256,47 @@ function cookieGetter(sessionKey) {
 /** A안: 앱 안에서 로그인한 웹 화면(WebView) 안에서 부른다. */
 async function webGetter() {
   const webView = new WebView();
-  try {
-    await withTimeout(webView.loadURL(BASE_URL + ORGS_PATH), REQUEST_TIMEOUT_SECONDS * 1000);
-  } catch (e) {
-    throw e instanceof UsageError ? e : new UsageError("offline", e && e.message);
-  }
-  const once = async (path) => {
-    const js = `fetch(${JSON.stringify(path)}, { credentials: "include", headers: { accept: "application/json" } })
-      .then(function (r) { return r.text().then(function (t) { completion(JSON.stringify({ status: r.status, body: t })); }); })
-      .catch(function (e) { completion(JSON.stringify({ status: 0, body: String(e) })); });`;
+  await loadPage(webView, BASE_URL + ORGS_PATH);
+
+  // 1순위: 웹 화면 안에서 fetch로 부른다(응답 코드까지 정확히 알 수 있다).
+  // 마지막 식이 Promise면 iOS 웹 화면이 "지원하지 않는 결과"로 실패하므로 즉시 실행 함수로 감싼다.
+  const viaFetch = async (path) => {
+    const js = `(function () {
+      fetch(${JSON.stringify(path)}, { credentials: "include", headers: { accept: "application/json" } })
+        .then(function (r) { return r.text().then(function (t) { completion(JSON.stringify({ status: r.status, body: t })); }); })
+        .catch(function (e) { completion(JSON.stringify({ status: 0, body: String(e) })); });
+    })();`;
     const out = await withTimeout(webView.evaluateJavaScript(js, true), REQUEST_TIMEOUT_SECONDS * 1000);
     return typeof out === "string" ? JSON.parse(out) : out;
   };
+
+  // 2순위: 주소를 웹 화면에 직접 열고 화면에 보이는 글자를 읽는다.
+  const viaPage = async (path) => {
+    await loadPage(webView, BASE_URL + path);
+    const js = `JSON.stringify({
+      text: document.body ? document.body.innerText : "",
+      html: document.documentElement ? document.documentElement.outerHTML.slice(0, 6000) : ""
+    })`;
+    const out = await withTimeout(webView.evaluateJavaScript(js, false), REQUEST_TIMEOUT_SECONDS * 1000);
+    return pageResponse(JSON.parse(out));
+  };
+
+  let fetchWorks = true;
+  const once = async (path) => {
+    if (fetchWorks) {
+      try {
+        const res = await viaFetch(path);
+        if (res && res.status) return res;
+        console.log(`웹 화면 fetch가 응답을 받지 못함(${res && res.body}), 페이지 방식으로 전환`);
+      } catch (e) {
+        if (e instanceof UsageError) throw e;
+        console.log(`웹 화면 fetch 실패(${e && e.message}), 페이지 방식으로 전환`);
+      }
+      fetchWorks = false;
+    }
+    return viaPage(path);
+  };
+
   return async (path) => {
     let res = await once(path);
     if (isBlocked(res)) {
@@ -277,6 +306,31 @@ async function webGetter() {
     }
     return res;
   };
+}
+
+async function loadPage(webView, url) {
+  try {
+    await withTimeout(webView.loadURL(url), REQUEST_TIMEOUT_SECONDS * 1000);
+  } catch (e) {
+    throw e instanceof UsageError ? e : new UsageError("offline", e && e.message);
+  }
+}
+
+/** 화면 글자만 읽었을 때 응답 코드를 짐작한다. */
+function pageResponse({ text, html }) {
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    // JSON이 아니면 로그인 화면이나 접속 확인 화면이다(ensureOk가 둘을 구분한다)
+    return { status: 403, body: html || text };
+  }
+  if (json && json.type === "error") {
+    const type = json.error && json.error.type;
+    const status = { authentication_error: 401, permission_error: 403, rate_limit_error: 429, not_found_error: 404 }[type] || 500;
+    return { status, body: text };
+  }
+  return { status: 200, body: text };
 }
 
 function withTimeout(promise, ms) {
@@ -1030,7 +1084,7 @@ async function webLoginFlow() {
       );
       return "done";
     }
-    const next = await failureChoice(result.kind, "web");
+    const next = await failureChoice(result, "web");
     if (next !== "retry") return next;
   }
 }
@@ -1056,7 +1110,7 @@ async function cookieFlow() {
       await notice("연결 성공", `${result.summary}\n\n이제 홈 화면이나 잠금 화면에 위젯을 추가하세요.`);
       return "done";
     }
-    const next = await failureChoice(result.kind, "cookie");
+    const next = await failureChoice(result, "cookie");
     if (next !== "retry") return next;
   }
 }
@@ -1087,7 +1141,7 @@ async function testConnection(mode, sessionKey) {
     return { ok: true, summary: `5시간 ${vm.five.pctText} · 주간 ${vm.week.pctText}` };
   } catch (e) {
     console.log(`연결 확인 실패: ${e && e.message}`);
-    return { ok: false, kind: e instanceof UsageError ? e.kind : "unknown" };
+    return { ok: false, kind: e instanceof UsageError ? e.kind : "unknown", detail: safeDetail(e) };
   }
 }
 
@@ -1112,10 +1166,18 @@ function failureMessage(kind, mode) {
   }
 }
 
-async function failureChoice(kind, mode) {
+/** 오류 원인을 짧게 보여준다. 혹시 모를 쿠키 값은 가린다. */
+function safeDetail(e) {
+  const text = String((e && e.message) || e || "").replace(/sk-ant-[A-Za-z0-9_\-]+/g, "sk-ant-…");
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
+async function failureChoice({ kind, detail }, mode) {
   const alert = new Alert();
   alert.title = "연결하지 못했어요";
   alert.message = failureMessage(kind, mode);
+  // 예상하지 못한 오류는 원인을 보여줘야 고칠 수 있다(이 화면을 캡처해 Claude Code에 보내면 된다)
+  if (kind === "unknown" && detail) alert.message += `\n\n자세한 내용: ${detail}`;
   alert.addAction("다시 시도");
   alert.addAction("다른 로그인 방식 고르기");
   alert.addCancelAction("취소");

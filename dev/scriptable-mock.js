@@ -370,18 +370,41 @@
       async loadJSON() { return JSON.parse(await this.loadString()); }
     }
 
+    // iOS WKWebView처럼 동작한다: 스크립트의 마지막 식 결과가 Promise 같은 객체면 실패한다.
+    // env.webView: "ok" | "load-fails" | "fetch-blocked"(페이지 안 fetch가 막힘, 예: 보안 정책)
     class WebView {
       async loadURL(url) {
         if (env.webView === "load-fails") throw new Error("WebView를 쓸 수 없음");
-        this.url = url;
+        this.path = url.replace("https://claude.ai", "");
+        env.requests.push({ via: "webview-page", path: this.path, method: "GET" });
+        try { this.page = await env.api(this.path, { via: "webview-page" }); } catch (e) { this.page = { status: 0, body: "" }; }
       }
       async evaluateJavaScript(js, useCallback) {
-        const m = js.match(/fetch\("([^"]+)"/);
-        const path = m[1];
-        env.requests.push({ via: "webview", path, method: "GET" });
-        let res;
-        try { res = await env.api(path, { via: "webview" }); } catch (e) { res = { status: 0, body: String(e) }; }
-        return JSON.stringify(res);
+        const page = this.page || { body: "" };
+        const isJson = (() => { try { JSON.parse(page.body); return true; } catch (e) { return false; } })();
+        const document = {
+          body: { innerText: isJson ? page.body : page.body.replace(/<[^>]+>/g, " ") },
+          documentElement: { outerHTML: isJson ? `<html><body><pre>${page.body}</pre></body></html>` : page.body },
+        };
+        const fetch = async (path) => {
+          if (env.webView === "fetch-blocked") throw new TypeError("Load failed");
+          env.requests.push({ via: "webview-fetch", path, method: "GET" });
+          const res = await env.api(path, { via: "webview-fetch" });
+          return { status: res.status, text: async () => res.body };
+        };
+        return new Promise((resolve, reject) => {
+          const completion = (v) => resolve(v);
+          let result;
+          try {
+            result = new Function("fetch", "completion", "document", "__js", "return eval(__js)")(fetch, completion, document, js);
+          } catch (e) {
+            reject(e);
+            return;
+          }
+          const supported = result === undefined || result === null || ["string", "number", "boolean"].includes(typeof result);
+          if (!supported) reject(new Error("JavaScript execution returned a result of an unsupported type"));
+          else if (!useCallback) resolve(result);
+        });
       }
       async present() {}
     }
