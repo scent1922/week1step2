@@ -134,9 +134,11 @@ function parseUsage(json) {
   const extras = [];
   for (const key of Object.keys(json)) {
     if (key === "five_hour" || key === "seven_day") continue;
+    const label = extraLabel(key);
+    if (!label) continue; // 뜻을 모르는 항목(내부 코드명 등)은 표시하지 않는다
     const limit = readLimit(json[key]);
     if (!limit || limit.pct === null) continue; // 값이 비어 있으면 표시하지 않는다
-    extras.push({ label: extraLabel(key), pct: limit.pct, resetsAt: limit.resetsAt });
+    extras.push({ label, pct: limit.pct, resetsAt: limit.resetsAt });
   }
   return {
     fiveHour: readLimit(json.five_hour) || { pct: null, resetsAt: null },
@@ -166,8 +168,7 @@ function extraLabel(key) {
     rest = key.slice("five_hour_".length);
   }
   const known = EXTRA_LABELS[rest] || EXTRA_LABELS[key];
-  if (known) return prefix + known;
-  return prefix + rest.split("_").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  return known ? prefix + known : null; // 표시할 항목을 늘리려면 EXTRA_LABELS에 이름을 추가한다
 }
 
 function pickOrganization(orgs) {

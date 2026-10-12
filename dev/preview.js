@@ -33,6 +33,8 @@
       seven_day_opus: opus == null ? null : { utilization: opus, resets_at: iso(weekly) },
       seven_day_sonnet: sonnet == null ? null : { utilization: sonnet, resets_at: iso(weekly) },
       extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: null },
+      // 뜻을 모르는 내부 코드명 항목은 위젯에 나오면 안 된다
+      seven_day_iguana_necktie: { utilization: 2, resets_at: iso(weekly) },
     }, extra));
   }
   function api(routes) {
@@ -215,6 +217,7 @@
           refreshMinutes: w.refreshAfterDate ? Math.round((w.refreshAfterDate - Date.now()) / 60000) : null,
           url: w.url,
         };
+        if (/iguana/i.test(entry.widgets[family].text)) entry.errors.push(`${family}: 모르는 항목이 표시됨`);
       } catch (e) {
         entry.errors.push(`${family}: ${e && e.stack}`);
       }
