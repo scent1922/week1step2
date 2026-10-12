@@ -1,0 +1,13 @@
+{
+  "name": "claude-usage-widget-dev",
+  "private": true,
+  "description": "위젯 미리보기 이미지 생성과 동작 점검용 도구",
+  "type": "module",
+  "scripts": {
+    "preview": "node render-previews.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/noto-sans-kr": "5.1.1",
+    "playwright": "1.56.1"
+  }
+}

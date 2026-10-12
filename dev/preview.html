@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Claude 사용량 위젯 미리보기</title>
+<link rel="stylesheet" href="/dev/node_modules/@fontsource/noto-sans-kr/400.css">
+<link rel="stylesheet" href="/dev/node_modules/@fontsource/noto-sans-kr/500.css">
+<link rel="stylesheet" href="/dev/node_modules/@fontsource/noto-sans-kr/600.css">
+<link rel="stylesheet" href="/dev/node_modules/@fontsource/noto-sans-kr/700.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: "Noto Sans KR", -apple-system, sans-serif; }
+  body.light { background: #F2F2F7; color: #1C1C1E; }
+  body.dark { background: #000; color: #F2F2F7; }
+  .widget, .widget * { font-family: "Noto Sans KR", -apple-system, sans-serif; line-height: 1.2; letter-spacing: -0.2px; }
+  .widget .tx { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+  .widget .st { min-width: 0; max-width: 100%; }
+  .widget .im { flex: 0 0 auto; }
+  #board { display: inline-grid; grid-template-columns: repeat(var(--cols, 1), max-content); gap: 28px 32px; }
+  .scenario { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .scenario h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .home, .lock { display: inline-flex; gap: 20px; align-items: flex-start; padding: 18px; border-radius: 26px; vertical-align: top; }
+  body.light .home { background: linear-gradient(135deg, #DCE6F5, #F4E7DA); }
+  body.dark .home { background: linear-gradient(135deg, #1B2333, #2B2119); }
+  .lock { background: linear-gradient(160deg, #2C3E63, #6B4A6E); }
+  figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  figcaption { font-size: 11px; opacity: .7; }
+  .lock figcaption { color: #fff; }
+  .widget.small, .widget.medium { box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+</style>
+</head>
+<body>
+<div id="board"></div>
+<script src="/dev/scriptable-mock.js"></script>
+<script src="/dev/preview.js"></script>
+</body>
+</html>
