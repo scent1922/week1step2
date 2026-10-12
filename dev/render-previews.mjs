@@ -45,7 +45,7 @@ function check(report) {
   for (const r of report) {
     if (r.fatal) { console.log("치명적 오류:", r.fatal); failed = true; continue; }
     const problems = [...r.errors];
-    if (r.requests.length !== r.expectRequests) problems.push(`요청 수 ${r.requests.length} (예상 ${r.expectRequests}): ${r.requests.join(", ")}`);
+    if (r.expectRequests !== null && r.requests.length !== r.expectRequests) problems.push(`요청 수 ${r.requests.length} (예상 ${r.expectRequests}): ${r.requests.join(", ")}`);
     if (!r.cookieHeaderOk) problems.push("쿠키 헤더가 올바르지 않음");
     for (const [family, w] of Object.entries(r.widgets)) {
       if (w.truncated.length) problems.push(`${family}: 글자 잘림 → ${w.truncated.join(" | ")}`);
@@ -54,6 +54,7 @@ function check(report) {
     }
     console.log(`\n[${r.id}] ${problems.length ? "문제 있음" : "OK"}`);
     for (const [family, w] of Object.entries(r.widgets)) console.log(`  ${family.padEnd(21)} ${w.text}`);
+    if (r.alerts) console.log(`  안내 창: ${r.alerts.join(" → ")}`);
     for (const p of problems) console.log(`  ! ${p}`);
     if (problems.length) failed = true;
   }

@@ -383,6 +383,7 @@
         const page = this.page || { body: "" };
         const isJson = (() => { try { JSON.parse(page.body); return true; } catch (e) { return false; } })();
         const document = {
+          cookie: env.webCookie || "",
           body: { innerText: isJson ? page.body : page.body.replace(/<[^>]+>/g, " ") },
           documentElement: { outerHTML: isJson ? `<html><body><pre>${page.body}</pre></body></html>` : page.body },
         };
@@ -431,7 +432,12 @@
       },
       args: { widgetParameter: env.widgetParameter || null },
       Script: { setWidget: (w) => { widget = w; }, complete: () => {} },
-      Alert: class { addAction() {} addCancelAction() {} addDestructiveAction() {} async presentAlert() { return -1; } async presentSheet() { return -1; } },
+      Alert: class {
+        addAction() {} addCancelAction() {} addDestructiveAction() {} addSecureTextField() {} addTextField() {}
+        textFieldValue() { return ""; }
+        async presentAlert() { (env.alerts = env.alerts || []).push(this.title); return -1; }
+        async presentSheet() { (env.alerts = env.alerts || []).push(this.title); return -1; }
+      },
       console: { log: (...a) => (env.logs = env.logs || []).push(a.join(" ")), error: (...a) => (env.logs = env.logs || []).push(a.join(" ")) },
     };
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;

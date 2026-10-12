@@ -228,6 +228,41 @@
     entry.logs = env.logs || [];
     report.push(entry);
   }
+  // 앱에서 실행: 위젯에서 앱 안 로그인 방식이 실패한 기록이 있을 때 쿠키 방식으로 자동 전환되는지
+  if (!only) {
+    const brokenWeb = () => cachedFile({ fetchedAgo: 60 * MIN, attemptAgo: 20 * MIN, data: oldData, web: { pendingSince: null, widgetBroken: false, widgetOkAt: null, appOkAt: now - 60 * MIN } });
+    const routes = okRoutes(usageBody({ five: 17, fiveReset: now + HOUR, week: 82 }));
+    const appTests = [
+      { id: "app-auto-switch", webCookie: "anthropic-device-id=x; sessionKey=sk-ant-sid01-TEST; lastActiveOrg=org-1", expectMode: "cookie", expectAlert: "위젯 자동 갱신을 고쳤어요" },
+      { id: "app-httponly", webCookie: "anthropic-device-id=x", expectMode: "web", expectAlert: "위젯이 값을 받지 못하고 있어요" },
+    ];
+    for (const t of appTests) {
+      const files = brokenWeb();
+      const cache = JSON.parse(files[CACHE]);
+      cache.error = "web_unavailable";
+      cache.errorContext = "widget";
+      files[CACHE] = JSON.stringify(cache);
+      const env = { inWidget: false, family: null, theme, keychain: { "claude-usage-widget.mode": "web", "claude-usage-widget.org-id": "org-1" }, files, webView: "ok", webCookie: t.webCookie, api: api(routes) };
+      const entry = { id: t.id, widgets: {}, errors: [], expectRequests: null };
+      try {
+        await runScript(code, env);
+      } catch (e) {
+        entry.errors.push(String(e && e.stack));
+      }
+      const mode = env.keychain["claude-usage-widget.mode"];
+      if (mode !== t.expectMode) entry.errors.push(`로그인 방식 ${mode} (예상 ${t.expectMode})`);
+      if (!(env.alerts || []).includes(t.expectAlert)) entry.errors.push(`안내 창 "${t.expectAlert}" 없음: ${(env.alerts || []).join(" / ")}`);
+      if (t.expectMode === "cookie") {
+        const saved = JSON.parse(env.files[CACHE]);
+        if (saved.web.widgetBroken || saved.error) entry.errors.push("전환 후에도 오류 기록이 남음");
+        if (env.keychain["claude-usage-widget.session-key"] !== "sk-ant-sid01-TEST") entry.errors.push("키체인에 쿠키가 저장되지 않음");
+      }
+      entry.requests = env.requests.map((r) => `${r.via} ${r.method} ${r.path}`);
+      entry.cookieHeaderOk = env.requests.filter((r) => r.via === "request").every((r) => r.headers.Cookie === "sessionKey=sk-ant-sid01-TEST");
+      entry.alerts = env.alerts || [];
+      report.push(entry);
+    }
+  }
   window.__report = report;
   window.__done = true;
 })().catch((e) => {

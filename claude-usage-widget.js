@@ -988,7 +988,7 @@ async function mainMenu() {
 
 function menuSummary(settings) {
   const lines = [];
-  const modeName = settings.mode === "web" ? "앱 안에서 로그인" : settings.mode === "cookie" ? "쿠키 붙여넣기" : "설정 안 됨";
+  const modeName = settings.mode === "web" ? "앱 안에서 로그인" : settings.mode === "cookie" ? "쿠키(키체인 저장)" : "설정 안 됨";
   lines.push(`로그인 방식: ${modeName}`);
   if (!settings.mode) return lines.join("\n");
   const cache = readCache();
@@ -1078,6 +1078,15 @@ async function webLoginFlow() {
 
     const result = await testConnection("web", null);
     if (result.ok) {
+      // 위젯(백그라운드)은 앱의 로그인 상태를 쓰지 못하므로, 가능하면 로그인 값을 키체인에 옮겨 둔다
+      if (await switchToCookieFromWebLogin()) {
+        await notice(
+          "연결 성공",
+          `${result.summary}\n\n위젯이 스스로 갱신할 수 있도록 로그인 정보를 이 아이폰의 키체인에 저장했어요.\n` +
+            "이제 홈 화면이나 잠금 화면에 위젯을 추가하세요."
+        );
+        return "done";
+      }
       await notice(
         "연결 성공",
         `${result.summary}\n\n이제 홈 화면이나 잠금 화면에 위젯을 추가하세요.\n` +
@@ -1200,14 +1209,47 @@ async function suggestCookieModeIfNeeded() {
   const cache = readCache();
   const widgetFailing = cache.web.widgetBroken || (cache.errorContext === "widget" && cache.error === "web_unavailable");
   if (!widgetFailing) return;
+  if (await switchToCookieFromWebLogin()) {
+    await notice(
+      "위젯 자동 갱신을 고쳤어요",
+      "앱 안 로그인은 iOS 제한으로 위젯(백그라운드)에서 쓸 수 없어서, 로그인 정보를 이 아이폰의 키체인에 저장해 위젯이 직접 쓰도록 바꿨어요.\n\n" +
+        "위젯은 다음 갱신 때(보통 15~30분 안) 새 값을 보여줘요."
+    );
+    return;
+  }
   const alert = new Alert();
   alert.title = "위젯이 값을 받지 못하고 있어요";
   alert.message =
-    "앱 안 로그인은 Scriptable 앱 안에서는 되지만, iOS 제한으로 위젯(백그라운드)에서는 작동하지 않는 것으로 확인됐어요.\n\n" +
-    "쿠키 붙여넣기 방식으로 바꾸면 위젯이 자동으로 갱신돼요.";
-  alert.addAction("쿠키 방식으로 바꾸기");
+    "앱 안 로그인은 Scriptable 앱 안에서는 되지만, iOS 제한으로 위젯(백그라운드)에서는 작동하지 않는 것으로 확인됐어요. " +
+    "로그인 정보를 자동으로 옮기는 것도 claude.ai 보안 설정 때문에 되지 않았어요.\n\n" +
+    "PC에서 쿠키(sessionKey)를 복사해 붙여넣으면 위젯이 자동으로 갱신돼요(방법은 설치안내 참고).";
+  alert.addAction("쿠키 붙여넣기");
   alert.addCancelAction("나중에");
   if ((await alert.presentAlert()) === 0) await cookieFlow();
+}
+
+/**
+ * 앱 안에서 로그인한 웹 화면에서 sessionKey를 읽을 수 있으면 읽어서, 위젯이 직접 쓰는 쿠키 방식으로 바꾼다.
+ * claude.ai가 쿠키를 스크립트에서 못 읽게(HttpOnly) 해 두었다면 null이 나와 아무것도 바꾸지 않는다.
+ */
+async function switchToCookieFromWebLogin() {
+  let sessionKey = null;
+  try {
+    const webView = new WebView();
+    await loadPage(webView, BASE_URL + ORGS_PATH);
+    const cookies = await withTimeout(webView.evaluateJavaScript("document.cookie", false), REQUEST_TIMEOUT_SECONDS * 1000);
+    const match = String(cookies || "").match(/(?:^|;\s*)sessionKey=([^;]+)/);
+    if (match) sessionKey = normalizeSessionKey(decodeURIComponent(match[1]));
+  } catch (e) {
+    console.log(`로그인 정보 자동 저장 실패: ${safeDetail(e)}`);
+  }
+  if (!sessionKey) {
+    console.log("웹 화면에서 sessionKey를 읽을 수 없음");
+    return false;
+  }
+  const result = await testConnection("cookie", sessionKey);
+  if (!result.ok) console.log(`쿠키 방식 확인 실패: ${result.kind}`);
+  return result.ok;
 }
 
 async function clearFlow() {
