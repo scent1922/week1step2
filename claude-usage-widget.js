@@ -1046,7 +1046,7 @@ async function setupFlow() {
     alert.title = "로그인 방법 선택";
     alert.message =
       "① 앱 안에서 로그인: 이 앱 안에서 claude.ai에 로그인해요. 쿠키를 복사할 필요가 없어요. " +
-      "다만 iOS 제한으로 위젯 자동 갱신이 안 될 수 있어서, 설정 후 자동으로 확인해 드려요.\n\n" +
+      "다만 위젯은 앱의 로그인 상태를 쓸 수 없어서, 로그인 정보를 자동으로 옮기지 못하면 ②가 필요해요(바로 알려드려요).\n\n" +
       "② 쿠키 붙여넣기: PC 브라우저에서 값을 복사해 와야 하지만, 위젯 자동 갱신이 가장 확실해요.";
     alert.addAction("① 앱 안에서 로그인 (먼저 시도)");
     alert.addAction("② 쿠키 붙여넣기 (PC 필요)");
@@ -1079,7 +1079,8 @@ async function webLoginFlow() {
     const result = await testConnection("web", null);
     if (result.ok) {
       // 위젯(백그라운드)은 앱의 로그인 상태를 쓰지 못하므로, 가능하면 로그인 값을 키체인에 옮겨 둔다
-      if (await switchToCookieFromWebLogin()) {
+      const switched = await switchToCookieFromWebLogin();
+      if (switched.ok) {
         await notice(
           "연결 성공",
           `${result.summary}\n\n위젯이 스스로 갱신할 수 있도록 로그인 정보를 이 아이폰의 키체인에 저장했어요.\n` +
@@ -1087,10 +1088,11 @@ async function webLoginFlow() {
         );
         return "done";
       }
-      await notice(
-        "연결 성공",
-        `${result.summary}\n\n이제 홈 화면이나 잠금 화면에 위젯을 추가하세요.\n` +
-          "앱 안 로그인 방식은 위젯에서 자동 갱신이 되는지 확인이 필요해요. 위젯을 추가하고 30분쯤 뒤 이 스크립트를 다시 열면 결과를 알려드려요."
+      await askCookiePaste(
+        "로그인은 됐지만, 위젯 자동 갱신은 안 돼요",
+        `${result.summary}\n\n` +
+          "iOS 제한으로 위젯은 이 앱 안의 로그인 상태를 쓸 수 없어요. 그래서 지금 값은 보이지만, 15~30분 뒤부터 위젯에 '위젯 갱신 불가'가 떠요.\n\n",
+        switched.reason
       );
       return "done";
     }
@@ -1209,7 +1211,8 @@ async function suggestCookieModeIfNeeded() {
   const cache = readCache();
   const widgetFailing = cache.web.widgetBroken || (cache.errorContext === "widget" && cache.error === "web_unavailable");
   if (!widgetFailing) return;
-  if (await switchToCookieFromWebLogin()) {
+  const switched = await switchToCookieFromWebLogin();
+  if (switched.ok) {
     await notice(
       "위젯 자동 갱신을 고쳤어요",
       "앱 안 로그인은 iOS 제한으로 위젯(백그라운드)에서 쓸 수 없어서, 로그인 정보를 이 아이폰의 키체인에 저장해 위젯이 직접 쓰도록 바꿨어요.\n\n" +
@@ -1217,12 +1220,24 @@ async function suggestCookieModeIfNeeded() {
     );
     return;
   }
+  await askCookiePaste(
+    "위젯이 값을 받지 못하고 있어요",
+    "앱 안 로그인은 Scriptable 앱 안에서는 되지만, iOS 제한으로 위젯(백그라운드)에서는 작동하지 않아요.\n\n",
+    switched.reason
+  );
+}
+
+/** 자동 전환이 안 될 때: 이유를 알려주고 쿠키 붙여넣기(②)로 안내한다. */
+async function askCookiePaste(title, intro, reason) {
+  const why =
+    reason === "unreadable"
+      ? "로그인 정보를 위젯으로 자동으로 옮기려 했지만, claude.ai 보안 설정 때문에 앱이 읽을 수 없었어요."
+      : `로그인 정보를 위젯으로 옮겨 시험했지만 claude.ai 연결이 되지 않았어요(원인: ${(ERROR_TEXT[reason] || ERROR_TEXT.unknown).title}). 이 화면을 캡처해 Claude Code에 보내 주세요.`;
   const alert = new Alert();
-  alert.title = "위젯이 값을 받지 못하고 있어요";
+  alert.title = title;
   alert.message =
-    "앱 안 로그인은 Scriptable 앱 안에서는 되지만, iOS 제한으로 위젯(백그라운드)에서는 작동하지 않는 것으로 확인됐어요. " +
-    "로그인 정보를 자동으로 옮기는 것도 claude.ai 보안 설정 때문에 되지 않았어요.\n\n" +
-    "PC에서 쿠키(sessionKey)를 복사해 붙여넣으면 위젯이 자동으로 갱신돼요(방법은 설치안내 참고).";
+    intro + why + "\n\n" +
+    "PC에서 쿠키(sessionKey)를 복사해 붙여넣으면 위젯이 스스로 갱신돼요. 방법은 설치안내 3단계 ②에 있어요.";
   alert.addAction("쿠키 붙여넣기");
   alert.addCancelAction("나중에");
   if ((await alert.presentAlert()) === 0) await cookieFlow();
@@ -1234,6 +1249,7 @@ async function suggestCookieModeIfNeeded() {
  */
 async function switchToCookieFromWebLogin() {
   let sessionKey = null;
+  // 반환: { ok: true } 또는 { ok: false, reason: "unreadable" | 오류 종류 }
   try {
     const webView = new WebView();
     await loadPage(webView, BASE_URL + ORGS_PATH);
@@ -1245,11 +1261,11 @@ async function switchToCookieFromWebLogin() {
   }
   if (!sessionKey) {
     console.log("웹 화면에서 sessionKey를 읽을 수 없음");
-    return false;
+    return { ok: false, reason: "unreadable" };
   }
   const result = await testConnection("cookie", sessionKey);
   if (!result.ok) console.log(`쿠키 방식 확인 실패: ${result.kind}`);
-  return result.ok;
+  return result.ok ? { ok: true } : { ok: false, reason: result.kind };
 }
 
 async function clearFlow() {
